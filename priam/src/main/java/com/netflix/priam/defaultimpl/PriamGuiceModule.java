@@ -55,6 +55,8 @@ import com.netflix.priam.restore.IRestoreStrategy;
 import com.netflix.priam.ICredential;
 
 
+import com.netflix.priam.aws.IAMCredential;
+
 public class PriamGuiceModule extends AbstractModule
 {
     @Override
@@ -77,7 +79,8 @@ public class PriamGuiceModule extends AbstractModule
         bind(ICredentialGeneric.class).annotatedWith(Names.named("gcscredential")).to(GcsCredential.class);
         bind(ICredentialGeneric.class).annotatedWith(Names.named("pgpcredential")).to(PgpCredential.class);
         bind(IRestoreStrategy.class).annotatedWith(Names.named("encryptedrestore")).to(EncryptedRestoreStrategy.class);
-        bind(ICredential.class).to(ClearCredential.class);
+        // bind(ICredential.class).to(ClearCredential.class);
+	bind(ICredential.class).to(IAMCredential.class);
         bind(IDeadTokenRetriever.class).to(DeadTokenRetriever.class);
         bind(IPreGeneratedTokenRetriever.class).to(PreGeneratedTokenRetriever.class);
         bind(INewTokenRetriever.class).to(NewTokenRetriever.class);
