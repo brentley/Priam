@@ -34,10 +34,13 @@ import com.netflix.priam.identity.InstanceIdentity;
 import org.joda.time.DateTime;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @ImplementedBy(S3BackupPath.class)
 public abstract class AbstractBackupPath implements Comparable<AbstractBackupPath>
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractBackupPath.class);
     private static final String FMT = "yyyyMMddHHmm";
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormat.forPattern(FMT);
     public static final char PATH_SEP = File.separatorChar;
@@ -57,13 +60,15 @@ public abstract class AbstractBackupPath implements Comparable<AbstractBackupPat
     protected String token;
     protected String region;
     protected Date time;
-    protected long size;
+    protected long size; //uncompressed file size
+    protected long compressedFileSize = 0;
     protected boolean isCassandra1_0;
 
 	protected final InstanceIdentity factory;
     protected final IConfiguration config;
     protected File backupFile;
     protected Date uploadedTs;
+    protected int awsSlowDownExceptionCounter = 0;
     
     public AbstractBackupPath(IConfiguration config, InstanceIdentity factory)
     {
@@ -202,6 +207,9 @@ public abstract class AbstractBackupPath implements Comparable<AbstractBackupPat
     {
         return type;
     }
+    public void setType(BackupFileType type) {
+        this.type = type;
+    }
 
     public String getClusterName()
     {
@@ -243,6 +251,9 @@ public abstract class AbstractBackupPath implements Comparable<AbstractBackupPat
         return time;
     }
 
+    /*
+    @return original, uncompressed file size
+     */
     public long getSize()
     {
         return size;
@@ -251,6 +262,13 @@ public abstract class AbstractBackupPath implements Comparable<AbstractBackupPat
     public void setSize(long size)
     {
         this.size = size;
+    }
+
+    public long getCompressedFileSize() {
+        return this.compressedFileSize;
+    }
+    public void setCompressedFileSize(long val) {
+        this.compressedFileSize = val;
     }
 
     public File getBackupFile()
@@ -318,5 +336,13 @@ public abstract class AbstractBackupPath implements Comparable<AbstractBackupPat
     public String toString()
     {
         return "From: " + getRemotePath() + " To: " + newRestoreFile().getPath();
+    }
+
+    public int getAWSSlowDownExceptionCounter() {
+        return this.awsSlowDownExceptionCounter;
+    }
+
+    public void setAWSSlowDownExceptionCounter(int val) {
+        this.awsSlowDownExceptionCounter = val;
     }
 }

@@ -25,11 +25,16 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import com.amazonaws.services.s3.model.AmazonS3Exception;
+import com.netflix.priam.aws.auth.IS3Credential;
+import com.netflix.priam.merics.IMetricPublisher;
 import org.apache.commons.io.IOUtils;
 
 import com.google.common.collect.Lists;
@@ -51,8 +56,8 @@ import com.amazonaws.services.s3.model.PartETag;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
+import com.google.inject.name.Named;
 import com.netflix.priam.IConfiguration;
-import com.netflix.priam.ICredential;
 import com.netflix.priam.backup.AbstractBackupPath;
 import com.netflix.priam.backup.BackupRestoreException;
 import com.netflix.priam.backup.IBackupFileSystem;
@@ -77,14 +82,18 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
     private RateLimiter rateLimiter;
 
     @Inject
-    public S3FileSystem(Provider<AbstractBackupPath> pathProvider, ICompression compress, final IConfiguration config, ICredential cred)
+    public S3FileSystem(Provider<AbstractBackupPath> pathProvider, ICompression compress, final IConfiguration config
+                        , @Named("awss3roleassumption")IS3Credential cred
+                        , @Named("defaultmetricpublisher") IMetricPublisher metricPublisher
+                    )
     {
+        super(metricPublisher);
         this.pathProvider = pathProvider;
         this.compress = compress;
         this.config = config;
         int threads = config.getMaxBackupUploadThreads();
         LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>(threads);
-        this.executor = new BlockingSubmitThreadPoolExecutor(threads, queue, UPLOAD_TIMEOUT);
+        this.executor = new BlockingSubmitThreadPoolExecutor(threads, queue, UPLOAD_TIMEOUT); //Provide 2 hours to upload all chunks of a file
         double throttleLimit = config.getUploadThrottle();
         rateLimiter = RateLimiter.create(throttleLimit < 1 ? Double.MAX_VALUE : throttleLimit);
 
@@ -130,7 +139,9 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
     @Override
     public void upload(AbstractBackupPath path, InputStream in) throws BackupRestoreException
     {
+        reinitialize();  //perform before file upload
         super.uploadCount.incrementAndGet();
+
         AmazonS3 s3Client = super.getS3Client();
         InitiateMultipartUploadRequest initRequest = new InitiateMultipartUploadRequest(config.getBackupPrefix(), path.getRemotePath());
         InitiateMultipartUploadResult initResponse = s3Client.initiateMultipartUpload(initRequest);
@@ -145,7 +156,9 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
             Iterator<byte[]> chunks = compress.compress(in, chunkSize);
             // Upload parts.
             int partNum = 0;
-            AtomicInteger partsUploaded = new AtomicInteger(0); 
+            AtomicInteger partsUploaded = new AtomicInteger(0);
+
+            long startTime = System.nanoTime();; //initialize for each file upload
             while (chunks.hasNext())
             {
                 byte[] chunk = chunks.next();
@@ -160,6 +173,9 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
             if (partNum != partETags.size())
                 throw new BackupRestoreException("Number of parts(" + partNum + ")  does not match the uploaded parts(" + partETags.size() + ")");
             new S3PartUploader(s3Client, part, partETags).completeUpload();
+            long completedTime = System.nanoTime();
+
+            postProcessingPerFile(path, TimeUnit.NANOSECONDS.toMillis(startTime), TimeUnit.NANOSECONDS.toMillis(completedTime));
             
             if (logger.isDebugEnabled())
             {	
@@ -169,11 +185,23 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
                logger.debug("S3 AWS x-amz-request-id[" + requestId + "], and x-amz-id-2[" + hostId + "]");
             }  
             
-        }
-        catch (Exception e)
+        } catch(AmazonS3Exception e) {
+            String amazoneErrorCode = e.getErrorCode();
+            if (amazoneErrorCode.equalsIgnoreCase("slowdown")) {
+                super.awsSlowDownExceptionCounter += 1;
+                logger.warn("Received slow down from AWS when uploading file: " + path.getFileName());
+            }
+            //No need to throw exception as this is not fatal (i.e. this exception does not mean AWS will throttle or fail the upload
+        } catch (Exception e)
         {
-        	logger.error("Error uploading file " + path.getFileName() + ", a datapart was not uploaded.  msg: " + e.getLocalizedMessage());
-            new S3PartUploader(s3Client, part, partETags).abortUpload();
+        	logger.error("Error uploading file " + path.getFileName() + ", a datapart was not uploaded.", e);
+            new S3PartUploader(s3Client, part, partETags).abortUpload(); //Tells S3 to abandon the upload
+
+            /* * * TODO vdn
+            check for http response of 503, and resp body xml.  See http://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
+            if throttling is done, publish metric so we knnow.
+            * */
+
             throw new BackupRestoreException("Error uploading file " + path.getFileName(), e);
         } finally {
             IOUtils.closeQuietly(in);
@@ -234,9 +262,22 @@ public class S3FileSystem extends S3FileSystemBase implements IBackupFileSystem,
     }
 
     @Override
+    /*
+    Note:  provides same information as getBytesUploaded() but it's meant for S3FileSystemMBean object types.
+     */
     public long bytesUploaded()
     {
         return super.bytesUploaded.get();
+    }
+
+    @Override
+    public long getBytesUploaded() {
+        return super.bytesUploaded.get();
+    }
+
+    @Override
+    public int getAWSSlowDownExceptionCounter() {
+        return super.awsSlowDownExceptionCounter;
     }
 
     @Override

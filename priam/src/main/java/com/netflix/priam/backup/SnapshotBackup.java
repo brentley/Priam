@@ -27,6 +27,10 @@ import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.netflix.priam.merics.IMeasurement;
+import com.netflix.priam.merics.SnapshotBackupMeasurement;
+import com.netflix.priam.notification.BackupNotificationMgr;
+import org.codehaus.jettison.json.JSONException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,14 +70,16 @@ public class SnapshotBackup extends AbstractBackup
 	private final Map<String, Object> snapshotKeyspaceFilter  = new HashMap<String, Object>(); //key: keyspace, value: null
 
 	private BackupStatusMgr completedBackups;
-    
+
 
     @Inject
     public SnapshotBackup(IConfiguration config, Provider<AbstractBackupPath> pathFactory, 
     		              MetaData metaData, CommitLogBackup clBackup, @Named("backup") IFileSystemContext backupFileSystemCtx
-    		              ,BackupStatusMgr completedBackups)
+    		              ,BackupStatusMgr completedBackups
+                          ,BackupNotificationMgr backupNotificationMgr
+                        )
     {
-    	super(config, backupFileSystemCtx, pathFactory);
+        super(config, backupFileSystemCtx, pathFactory, backupNotificationMgr);
         this.metaData = metaData;
         this.clBackup = clBackup;
         this.completedBackups = completedBackups;
@@ -196,11 +202,18 @@ public class SnapshotBackup extends AbstractBackup
                 }
                 
             }
+
+            //pre condition notifiy of meta.json upload
+            File tmpMetaFile = metaData.createTmpMetaFile(); //Note: no need to remove this temp as it is done within createTmpMetaFile()
+            AbstractBackupPath metaJsonAbp = metaData.decorateMetaJson(tmpMetaFile, snapshotName);
+            metaJsonAbp.setCompressedFileSize(0);
+            backupNotificationMgr.notify(metaJsonAbp, BackupNotificationMgr.STARTED);
+
             // Upload meta file
-            metaData.set(bps, snapshotName);
+            AbstractBackupPath metaJson = metaData.set(bps, snapshotName);
             logger.info("Snapshot upload complete for " + snapshotName);
             Calendar completed = Calendar.getInstance(TimeZone.getTimeZone("GMT"));
-            this.postProcesing(snapshotName, startTime, completed.getTime());
+            postProcesing(snapshotName, startTime, completed.getTime(), metaJson);
             
             if(snapshotRemotePaths.size() > 0)
             {
@@ -220,17 +233,18 @@ public class SnapshotBackup extends AbstractBackup
             }
         }
     }
-    
+
     /*
      * Performs any post processing (e.g. log success of backup).
      * 
      * @param name of the snapshotname, format is yyyymmddhhs
      * @param start time of backup
      */
-    private void postProcesing(String snapshotname, Date start, Date completed) {
-    	String key = BackupStatusMgr.formatKey(IMessageObserver.BACKUP_MESSAGE_TYPE.SNAPSHOT, start);  //format is backuptype_yyyymmdd
-    	BackupMetadata metadata = this.completedBackups.add(key, snapshotname, start, completed);
-    	
+    private void postProcesing(String snapshotname, Date start, Date completed, AbstractBackupPath adp) throws JSONException {
+        String key = BackupStatusMgr.formatKey(IMessageObserver.BACKUP_MESSAGE_TYPE.SNAPSHOT, start);  //format is backuptype_yyyymmdd
+        BackupMetadata metadata = this.completedBackups.add(key, snapshotname, start, completed);
+
+        backupNotificationMgr.notify(adp, BackupNotificationMgr.SUCCESS_VAL);
     }
     
     /*
@@ -322,7 +336,7 @@ public class SnapshotBackup extends AbstractBackup
     public static TaskTimer getTimer(IConfiguration config)
     {
         int hour = config.getBackupHour();
-        return new CronTimer(hour, 1, 0);
+        return new CronTimer(JOBNAME, hour, 1, 0);
     }
 
    

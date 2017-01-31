@@ -54,6 +54,7 @@ public class PriamConfiguration implements IConfiguration
     private static final String CONFIG_MR_ENABLE = PRIAM_PRE + ".multiregion.enable";
     private static final String CONFIG_CL_LOCATION = PRIAM_PRE + ".commitlog.location";
     private static final String CONFIG_JMX_LISTERN_PORT_NAME = PRIAM_PRE + ".jmx.port";
+    private static final String CONFIG_JMX_ENABLE_REMOTE = PRIAM_PRE + ".jmx.remote.enable";
     private static final String CONFIG_AVAILABILITY_ZONES = PRIAM_PRE + ".zones.available";
     private static final String CONFIG_SAVE_CACHE_LOCATION = PRIAM_PRE + ".cache.location";
     private static final String CONFIG_NEW_MAX_HEAP_SIZE = PRIAM_PRE + ".heap.newgen.size.";
@@ -73,6 +74,7 @@ public class PriamConfiguration implements IConfiguration
     private static final String CONFIG_BOOTCLUSTER_NAME = PRIAM_PRE + ".bootcluster";
     private static final String CONFIG_ENDPOINT_SNITCH = PRIAM_PRE + ".endpoint_snitch";
     private static final String CONFIG_MEMTABLE_TOTAL_SPACE = PRIAM_PRE + ".memtabletotalspace";
+    private static final String CONFIG_MEMTABLE_CLEANUP_THRESHOLD = PRIAM_PRE + ".memtable.cleanup.threshold";
     private static final String CONFIG_CASS_PROCESS_NAME = PRIAM_PRE + ".cass.process";
     private static final String CONFIG_VNODE_NUM_TOKENS = PRIAM_PRE + ".vnodes.numTokens";
     private static final String CONFIG_YAML_LOCATION = PRIAM_PRE + ".yamlLocation";
@@ -173,6 +175,7 @@ public class PriamConfiguration implements IConfiguration
     
     // Amazon specific
     private static final String CONFIG_ASG_NAME = PRIAM_PRE + ".az.asgname";
+    private static final String CONFIG_SIBLING_ASG_NAMES = PRIAM_PRE + ".az.sibling.asgnames";
     private static final String CONFIG_REGION_NAME = PRIAM_PRE + ".az.region";
     private static final String CONFIG_ACL_GROUP_NAME = PRIAM_PRE + ".acl.groupname";
     private final String LOCAL_HOSTNAME = SystemUtils.getDataFromUrl("http://169.254.169.254/latest/meta-data/local-hostname").trim();
@@ -518,6 +521,14 @@ public class PriamConfiguration implements IConfiguration
         return config.get(CONFIG_JMX_LISTERN_PORT_NAME, DEFAULT_JMX_PORT);
     }
 
+    /**
+     * @return Enables Remote JMX connections n C*
+     */
+    @Override
+    public boolean enableRemoteJMX() {
+        return config.get(CONFIG_JMX_ENABLE_REMOTE, false);
+    }
+
     public int getNativeTransportPort()
     {
         return config.get(CONFIG_NATIVE_PROTOCOL_PORT, DEFAULT_NATIVE_PROTOCOL_PORT);
@@ -681,6 +692,14 @@ public class PriamConfiguration implements IConfiguration
         return config.get(CONFIG_ASG_NAME, "");
     }
 
+    /**
+     * Amazon specific setting to query Additional/ Sibling ASG Memberships in csv format to consider while calculating RAC membership
+     */
+    @Override
+    public String getSiblingASGNames() {
+        return config.get(CONFIG_SIBLING_ASG_NAMES, ",");
+    }
+
     @Override
     public String getACLGroupName()
     {
@@ -759,6 +778,12 @@ public class PriamConfiguration implements IConfiguration
     public int getMemtableTotalSpaceMB()
     {
         return config.get(CONFIG_MEMTABLE_TOTAL_SPACE, 1024);
+    }
+
+    /**
+     *   memtable_cleanup_threshold defaults to 1 / (memtable_flush_writers + 1) ==> 0.11
+     */
+    public double getMemtableCleanupThreshold(){return config.get(CONFIG_MEMTABLE_CLEANUP_THRESHOLD, 0.11);
     }
 
     @Override
@@ -1159,6 +1184,21 @@ public class PriamConfiguration implements IConfiguration
     @Override
     public int getStreamingSocketTimeoutInMS() {
         return config.get(CONFIG_STREAMING_SOCKET_TIMEOUT_IN_MS, DEFAULT_STREAMING_SOCKET_TIMEOUT_IN_MS);
+    }
+
+    @Override
+    public String getFlushKeyspaces() {
+        return config.get(PRIAM_PRE  + ".flush.keyspaces");
+    }
+
+    @Override
+    public String getFlushInterval() {
+        return config.get(PRIAM_PRE  + ".flush.interval");
+    }
+
+    @Override
+    public String getBackupStatusFileLoc() {
+        return "backup.status";
     }
 
 }

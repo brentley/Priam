@@ -4,6 +4,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.netflix.priam.merics.AWSSlowDownExceptionMeasurement;
+import com.netflix.priam.merics.BackupUploadRateMeasurement;
+import com.netflix.priam.merics.IMeasurement;
+import com.netflix.priam.merics.IMetricPublisher;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,11 +28,19 @@ public class S3FileSystemBase {
     protected static final long MAX_BUFFERED_IN_STREAM_SIZE = 5 * 1024 * 1024;
 	
 	protected AtomicInteger uploadCount = new AtomicInteger();
-	protected AtomicLong bytesUploaded = new AtomicLong();
+	protected AtomicLong bytesUploaded = new AtomicLong(); //bytes uploaded per file
     protected AtomicInteger downloadCount = new AtomicInteger();
     protected AtomicLong bytesDownloaded = new AtomicLong();
 	protected AmazonS3Client s3Client;
-	
+    protected IMetricPublisher metricPublisher;
+    protected IMeasurement awsSlowDownMeasurement;
+    protected int awsSlowDownExceptionCounter = 0;
+
+    public S3FileSystemBase (IMetricPublisher metricPublisher) {
+        this.metricPublisher = metricPublisher;
+        awsSlowDownMeasurement = new AWSSlowDownExceptionMeasurement(); //a counter of AWS warning for all uploads
+    }
+
     /*
      * S3 End point information
      * http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
@@ -131,5 +143,57 @@ public class S3FileSystemBase {
             rules.remove(rule);
         }
         return true;
-    }    
+    }
+
+    /*
+    @param path - representation of the file uploaded
+    @param start time of upload, in millisecs
+    @param completion time of upload, in millsecs
+     */
+    protected void postProcessingPerFile(AbstractBackupPath path, long startTimeInMilliSecs, long completedTimeInMilliSecs) {
+        //Publish upload rate for each uploaded file
+        try {
+            long sizeInBytes = path.getSize();
+            long elapseTimeInMillisecs = completedTimeInMilliSecs - startTimeInMilliSecs;
+            long elapseTimeInSecs = elapseTimeInMillisecs / 1000; //converting millis to seconds as 1000m in 1 second
+            long bytesReadPerSec = 0;
+            Double speedInKBps = 0.0;
+            if (elapseTimeInSecs> 0 && sizeInBytes > 0) {
+                bytesReadPerSec = sizeInBytes / elapseTimeInSecs;
+                speedInKBps = bytesReadPerSec / 1024D;
+            } else {
+                bytesReadPerSec = sizeInBytes;  //we uploaded the whole file in less than a sec
+                speedInKBps = (double) sizeInBytes;
+            }
+
+            logger.info("Upload rate for file: " + path.getFileName()
+                    + ", elapsse time in sec(s): " + elapseTimeInSecs
+                    + ", KB per sec: " + speedInKBps
+            );
+
+            /*
+            This measurement is different than most others.  Other measurements are applicable to all occurrences (e.g
+            node tool flush errors, AWS TPS warning errors).  Upload rate for all occurrences (uploads) is not useful; rather,
+            we are interested in the upload rate per file.  Hence "metadata" is the upload rate for the just uploaded file.
+             */
+            IMeasurement backupUploadRateMeasurement = new BackupUploadRateMeasurement();
+            BackupUploadRateMeasurement.Metadata metadata = new BackupUploadRateMeasurement.Metadata(path.getFileName(), speedInKBps, elapseTimeInMillisecs);
+            backupUploadRateMeasurement.setVal(metadata);
+            this.metricPublisher.publish(backupUploadRateMeasurement); //signal of upload rate for file
+
+            awsSlowDownMeasurement.incrementFailureCnt(path.getAWSSlowDownExceptionCounter());
+            this.metricPublisher.publish(awsSlowDownMeasurement); //signal of possible throttling by aws
+
+        } catch (Exception e) {
+            logger.error("Post processing of file " + path.getFileName() + " failed, not fatal.", e);
+        }
+    }
+
+    /*
+    Reinitializtion which should be performed before uploading a file
+     */
+    protected void reinitialize() {
+        bytesUploaded = new AtomicLong(0); //initi
+        this.awsSlowDownExceptionCounter = 0;
+    }
 }

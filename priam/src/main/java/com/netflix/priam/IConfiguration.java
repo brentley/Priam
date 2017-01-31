@@ -123,7 +123,13 @@ public interface IConfiguration
      * @return Cassandra's JMX port
      */
     public int getJmxPort();
-        
+
+    /**
+     * @return Enables Remote JMX connections n C*
+     */
+    public boolean enableRemoteJMX();
+
+
     /**
      * Cassandra storage/cluster communication port
      */
@@ -269,7 +275,12 @@ public interface IConfiguration
      * Amazon specific setting to query ASG Membership
      */
     public String getASGName();
-    
+
+    /**
+     * Amazon specific setting to query Additional/ Sibling ASG Memberships in csv format to consider while calculating RAC membership
+     */
+    public String getSiblingASGNames();
+
     /**
      * Get the security group associated with nodes in this cluster
      */
@@ -339,6 +350,11 @@ public interface IConfiguration
      * @return Get Memtable throughput settings
      */
     public int getMemtableTotalSpaceMB();
+
+    /**
+     * @return memtable_cleanup_threshold in C* yaml
+     */
+    double getMemtableCleanupThreshold();
     
     /**
      * @return stream_throughput_outbound_megabits_per_sec in yaml
@@ -565,4 +581,19 @@ public interface IConfiguration
      * @return streaming_socket_timeout_in_ms in C* yaml
      */
     int getStreamingSocketTimeoutInMS();
+
+    /*
+     * @return a comma delimited list of keyspaces to flush
+     */
+    public String getFlushKeyspaces();
+    /*
+     * @return the interval to run the flush task.  Format is name=value where
+     * “name” is an enum of hour, daily, value is ...
+     */
+    public String getFlushInterval();
+
+    /*
+    @return the absolute path to store the backup status on disk
+     */
+    public String getBackupStatusFileLoc();
 }

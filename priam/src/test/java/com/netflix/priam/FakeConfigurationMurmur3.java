@@ -96,6 +96,14 @@ public class FakeConfigurationMurmur3 implements IConfiguration
         return 7199;
     }
 
+    /**
+     * @return Enables Remote JMX connections n C*
+     */
+    @Override
+    public boolean enableRemoteJMX() {
+        return false;
+    }
+
     @Override
     public int getThriftPort()
     {
@@ -224,6 +232,14 @@ public class FakeConfigurationMurmur3 implements IConfiguration
     public String getASGName()
     {
         // TODO Auto-generated method stub
+        return null;
+    }
+
+    /**
+     * Amazon specific setting to query Additional/ Sibling ASG Memberships in csv format to consider while calculating RAC membership
+     */
+    @Override
+    public String getSiblingASGNames() {
         return null;
     }
 
@@ -367,6 +383,14 @@ public class FakeConfigurationMurmur3 implements IConfiguration
     public int getMemtableTotalSpaceMB()
     {
         return 0;
+    }
+
+    /**
+     * @return memtable_cleanup_threshold in C* yaml
+     */
+    @Override
+    public double getMemtableCleanupThreshold() {
+        return 0.11;
     }
 
     @Override
@@ -730,5 +754,20 @@ public class FakeConfigurationMurmur3 implements IConfiguration
     @Override
     public int getStreamingSocketTimeoutInMS() {
         return 86400000;
+    }
+
+    @Override
+    public String getFlushKeyspaces() {
+        return new String();
+    }
+
+    @Override
+    public String getFlushInterval() {
+        return null;
+    }
+
+    @Override
+    public String getBackupStatusFileLoc() {
+        return null;
     }
 }
